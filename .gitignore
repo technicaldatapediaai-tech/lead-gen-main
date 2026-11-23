@@ -1,0 +1,22 @@
+# Leadnius monorepo (docs/go-live.md). Secrets and customer data never go to git.
+.env
+.env.*
+!.env*.example
+
+# customer / private data
+client-playbooks/
+emails/
+_backup/
+ops/daily-leads/accounts.json
+ops/daily-leads/logs/
+ops/daily-leads/scout-files/
+ops/daily-leads/.lock
+critical_errors.log
+*.log
+
+# local tooling
+.claude/
+.vscode/
+.pytest_cache/
+.DS_Store
+backend

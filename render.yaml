@@ -1,0 +1,168 @@
+# Render blueprint for Leadnius (docs/go-live.md): the API, the web app (Next.js, with the SEO / GEO / AEO job worker
+# inside it) and their two Postgres databases. Render → New → Blueprint → pick the repo.
+# After the first sync, fill every `sync: false` value in the dashboard, then run `python3 ops/golive_check.py`
+# against copies of the production values.
+databases:
+  - name: leadnius-db          # API: workspaces, leads, campaigns, content studio
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+  - name: leadnius-seo-db      # web app: SEO / GEO / AEO (Prisma)
+    plan: basic-256mb
+    postgresMajorVersion: "16"
+
+services:
+  # ---------------------------------------------------------------- API (lead-gen-backend, FastAPI)
+  - type: web
+    name: leadnius-api
+    runtime: docker
+    rootDir: lead-gen-backend
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    healthCheckPath: /health
+    autoDeploy: true
+    disk:                       # uploaded / AI images for Content Studio graphics (Instagram fetches them by URL)
+      name: studio-media
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leadnius-db
+          property: connectionString   # postgres://… ; config.py rewrites it to the asyncpg driver
+      - key: DEV_MODE
+        value: "false"
+      - key: SECRET_KEY
+        generateValue: true             # never change after launch (logs everyone out, breaks stored tokens)
+      - key: INBOUND_WEBHOOK_SECRET
+        generateValue: true
+      - key: TRUST_PROXY_HEADERS
+        value: "true"
+      - key: WEB_CONCURRENCY
+        value: "2"
+      - key: CONTENT_MEDIA_DIR
+        value: /var/data/studio
+      - key: FRONTEND_URL
+        sync: false                   # https://app.leadnius.in
+      - key: BACKEND_URL
+        sync: false                   # https://api.leadnius.in (OAuth callbacks); leave empty to use the onrender.com URL
+      # email (signup verification, password reset)
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false                   # e.g. Leadnius <hello@leadnius.in> on a domain verified in Resend
+      # AI
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # sign-in, inboxes, posting
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: MICROSOFT_CLIENT_ID
+        sync: false
+      - key: MICROSOFT_CLIENT_SECRET
+        sync: false
+      - key: LINKEDIN_CLIENT_ID
+        sync: false
+      - key: LINKEDIN_CLIENT_SECRET
+        sync: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: X_CLIENT_ID
+        sync: false
+      - key: X_CLIENT_SECRET
+        sync: false
+      - key: REDDIT_CLIENT_ID          # Reddit "web app": posting + lead capture
+        sync: false
+      - key: REDDIT_CLIENT_SECRET
+        sync: false
+      - key: UNIPILE_API_KEY
+        sync: false
+      - key: UNIPILE_WEBHOOK_SECRET
+        sync: false
+      # real sends (all follow DEV_MODE=false; listed so nobody has to guess)
+      - key: EMAIL_DRY_RUN
+        value: "false"
+      - key: WHATSAPP_DRY_RUN
+        value: "false"
+      - key: UNIPILE_DRY_RUN
+        value: "false"
+      - key: CONTENT_POST_DRY_RUN
+        value: "false"
+
+  # ---------------------------------------------------------------- web app (lead-gen-frontend, Next.js)
+  # One instance runs the pages, the API routes and the SEO job worker (RUN_WORKER_IN_APP=true). When you need more
+  # than one instance, set RUN_WORKER_IN_APP=false here and add a worker service: startCommand `npm run seo:worker:prod`
+  # with the same env vars.
+  - type: web
+    name: leadnius-web
+    runtime: node
+    rootDir: lead-gen-frontend
+    plan: standard                    # the Next.js build + crawler need more than 512 MB
+    buildCommand: npm ci && npm run build
+    preDeployCommand: npx prisma migrate deploy
+    startCommand: npm run start
+    healthCheckPath: /api/seo/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leadnius-seo-db
+          property: connectionString
+      - key: DIRECT_URL
+        fromDatabase:
+          name: leadnius-seo-db
+          property: connectionString
+      - key: NEXT_PUBLIC_API_URL
+        sync: false                   # https://api.leadnius.in (read at build time)
+      - key: LEADNIUS_API_URL
+        sync: false                   # same as NEXT_PUBLIC_API_URL
+      - key: APP_URL
+        sync: false                   # https://app.leadnius.in
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: CREDENTIALS_KEY
+        sync: false                   # 64 hex characters: `openssl rand -hex 32`; never change after launch
+      - key: RUN_WORKER_IN_APP
+        value: "true"
+      - key: NEXT_MANUAL_SIG_HANDLE
+        value: "true"                 # lets the worker hand back or finish jobs when a deploy stops the instance
+      - key: ALLOW_SIMULATED_PROVIDER
+        value: "false"
+      - key: AI_DAILY_BUDGET_USD
+        value: "5"
+      # AI for SEO answers and Content Studio AI images
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: OPENROUTER_VISIBILITY_MODELS
+        sync: false
+      - key: OPENROUTER_ANALYSIS_MODELS
+        sync: false
+      - key: OPENROUTER_WEB_ENGINE
+        value: native
+      - key: CONTENT_IMAGE_MODEL
+        value: openai/gpt-image-1-mini
+      - key: DATAFORSEO_LOGIN
+        sync: false
+      - key: DATAFORSEO_PASSWORD
+        sync: false
+      # SEO emails (monthly reports, alerts)
+      - key: SMTP_HOST
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASS
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      # Google Search Console connect (SEO)
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
